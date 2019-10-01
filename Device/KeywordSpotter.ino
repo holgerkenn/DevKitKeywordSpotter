@@ -7,6 +7,8 @@
 #include "RGB_LED.h"
 #include <stdint.h>
 #include <SystemTickCounter.h>
+#include "AZ3166WiFi.h"
+#include "DevKitMQTTClient.h"
 
 #define MFCC_WRAPPER_DEFINED
 #include "featurizer.h"
@@ -262,6 +264,23 @@ void check_buttons()
   }
 }
 
+bool send_iot(int maxclass, float confidence, const char * classname)
+{
+char buff[256];
+snprintf(buff, 256, "{\"maxclass\":%d,\"confidence\":%f,\"classname\":\"%s\"}",maxclass,confidence,classname);
+    
+    if (DevKitMQTTClient_SendEvent(buff))
+    {
+      Screen.print(1, "Sending...");
+    }
+    else
+    {
+      Screen.print(1, "Failure...");
+    }
+
+return true;
+}
+
 // Process a input buffer through the featurizer and classifier to see if we can
 // spot one of the keywords in categories.h.  A bit of smoothing is done on the 
 // predictions so the screen doesn't update too often.  
@@ -324,6 +343,7 @@ bool get_prediction(float* featurizer_input_buffer)
           char line[120];
           sprintf(line, "%d %%", percent);
           Screen.print(1, line);
+          send_iot(argmax,max,categories[argmax]);
           if (argmax == hint_index)
           {
             hint_index++;
@@ -411,6 +431,32 @@ void start_recording()
   // Start to record audio data
   Audio.startRecord(audio_callback);
 }
+static bool hasWifi = false;
+static bool hasIoTHub = false;
+
+void connectWifi()
+{
+  if (WiFi.begin() == WL_CONNECTED)
+  {
+    
+    hasWifi = true;
+    Screen.print(1, "Running...");
+
+    if (!DevKitMQTTClient_Init())
+    {
+      hasIoTHub = false;
+      return;
+    }
+    hasIoTHub = true;
+  }
+  else
+  {
+    hasWifi = false;
+    Screen.print(1, "No Wi-Fi");
+  }
+
+}
+
 
 // This is our normal Arduino setup function, here we setup various things and we check that
 // the featurizer and classifier we linked with actually match the global variables defined
@@ -428,6 +474,13 @@ void setup(void)
   Serial.printf("Recognizing %d keywords\n", max_category);
   
   buttons.init();
+  connectWifi();
+  if (!hasIoTHub)
+  {
+    Screen.print(1,"IoT Failed");
+    Serial.println("IoT Failed");
+
+  }
 
   int filter_size = mfcc_GetInputSize(0);
   if (filter_size != FEATURIZER_INPUT_SIZE)
